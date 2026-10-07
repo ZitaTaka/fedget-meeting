@@ -2,6 +2,7 @@
 // 対応: 見出し, 段落, 箇条書き(ネスト), 番号付きリスト, 表, 引用, コードブロック, 水平線, **太字**, `code`, [text](http(s)://)
 
 import { el } from './utils.js';
+import { isSafeImageDataUrl } from './notes-editor.js';
 
 function safeUrl(url) {
   try {
@@ -14,18 +15,25 @@ function safeUrl(url) {
 
 export function renderInline(text) {
   const frag = document.createDocumentFragment();
-  const re = /(\*\*([^*]+?)\*\*|`([^`]+?)`|\[([^\]]+?)\]\(([^)\s]+?)\))/g;
+  const re = /(!\[([^\]]*?)\]\((data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)\)|\*\*([^*]+?)\*\*|`([^`]+?)`|\[([^\]]+?)\]\(([^)\s]+?)\))/g;
   let last = 0;
   let m;
   const s = String(text ?? '');
   while ((m = re.exec(s))) {
     if (m.index > last) frag.append(document.createTextNode(s.slice(last, m.index)));
-    if (m[2] !== undefined) frag.append(el('strong', { text: m[2] }));
-    else if (m[3] !== undefined) frag.append(el('code', { text: m[3] }));
-    else if (m[4] !== undefined) {
-      const href = safeUrl(m[5]);
+    if (m[3] !== undefined) {
+      // 画像は埋め込み data:image のみ（外部 URL は読み込まない）
+      if (isSafeImageDataUrl(m[3])) {
+        const img = el('img', { class: 'md-img', alt: m[2] || '画像' });
+        img.setAttribute('src', m[3]);
+        frag.append(img);
+      } else frag.append(document.createTextNode(m[2] ? `[${m[2]}]` : '[画像]'));
+    } else if (m[4] !== undefined) frag.append(el('strong', { text: m[4] }));
+    else if (m[5] !== undefined) frag.append(el('code', { text: m[5] }));
+    else if (m[6] !== undefined) {
+      const href = safeUrl(m[7]);
       if (href) {
-        const a = el('a', { text: m[4], target: '_blank', rel: 'noopener noreferrer' });
+        const a = el('a', { text: m[6], target: '_blank', rel: 'noopener noreferrer' });
         a.setAttribute('href', href);
         frag.append(a);
       } else {

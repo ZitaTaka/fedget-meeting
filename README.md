@@ -28,7 +28,7 @@
 | Context | Markdown の Upload（.md / .txt）/ Download（未登録時は標準テンプレート）/ 画面編集・解析プレビュー |
 | Live Minutes | 前回処理以降の新規 Transcript だけを LLM に渡し、議論単位のブロック（提示情報・論点・議論・決定・Action・未決・確認事項）を時系列に追記。累積サマリ（決定・Action・未決・Rolling Summary） |
 | Meeting Advisor | 現在地 / 目的との整合 / Agenda 位置（順序変更対応）/ 逸脱検知 / 残り時間と時間アラート / 推奨する進め方 / 未確認事項 / 次に聞くべきこと / 想定 QA 回答案 / 残りの進行プラン。毎回全体を書き換え。「事実・推定・推奨」をバッジで区別 |
-| Notes | 自由入力。議事録作成・LLM 入力に利用 |
+| Notes | contenteditable のアウトラインエディタ（箇条書き、Tab / Shift+Tab で階層変更、画像の貼り付け・ドラッグ&ドロップ）。議事録作成・LLM 入力に利用 |
 | 議事録作成 | LLM で最終 Markdown 議事録を生成して `YYYYMMDD_HHmm_{会議名}_minutes.md` をダウンロード。LLM 未設定・エラー時も「LLMによる要約未実施」と明記したうえで会議情報・Context・Notes・Raw Transcript を出力 |
 | 保存 | 自己完結型 HTML Snapshot（`YYYYMMDD_HHmm_{会議名}_snapshot.html`）。API Key 等の Secret は含めない |
 | LLM | OpenAI 方式（OpenAI 互換 REST、Base URL 変更可）/ Gemini 方式。接続テスト付き |
@@ -62,6 +62,8 @@
 │  ├─ markdown.js             安全な Markdown → DOM レンダラ
 │  ├─ settings-service.js     設定の LocalStorage 永続化・破損時復旧
 │  ├─ session-service.js      会議データ・Context の自動保存
+│  ├─ notes-editor.js         Notes エディタ（箇条書き・階層・画像・独自 Undo）
+│  ├─ image-store.js          メモ画像の自動保存（IndexedDB）
 │  ├─ notify.js               トースト・通知ログ
 │  ├─ utils.js                共通ユーティリティ
 │  └─ env-check.js            起動環境チェック（file:// / 非セキュアコンテキストの警告）
@@ -112,6 +114,22 @@ Web Speech API（`SpeechRecognition` / `webkitSpeechRecognition`）と画面・�
 7. **■ 終了** … マイク・画面共有を解放
 8. **議事録作成**（Markdown）/ **保存**（HTML Snapshot）
 9. 次の会議は **新規**（Context・設定は維持）
+
+### Notes（メモ）の操作
+
+| 操作 | 動作 |
+|---|---|
+| Enter | 新しい項目（同じ階層） |
+| Tab / Shift+Tab | 階層を下げる / 上げる（最大 6 階層。複数行を選択して一括変更可） |
+| 空の項目で Enter / 行頭で Backspace | 1 段上の階層に戻す |
+| Shift+Enter | 項目内で改行 |
+| Ctrl+V / ドラッグ&ドロップ（画像） | 画像を挿入（長辺 1600px を超える・大きい画像は自動縮小）。ダブルクリックで拡大表示 |
+| Ctrl+V（テキスト） | プレーンテキストとして貼り付け。複数行の `- ` / `* ` / `1.` やインデントは箇条書きの階層として取り込み（書式・HTML は取り込みません） |
+| Ctrl+Z / Ctrl+Y（Ctrl+Shift+Z） | 元に戻す / やり直し |
+
+- LLM には Markdown の箇条書き（画像は `[画像1]` などの表記のみ、画像自体は送信しない）として渡します
+- 最終議事録には「## Notes（ユーザーメモ原文）」として箇条書きと画像（data URL 埋め込み）を出力します。HTML Snapshot では入れ子のリストと画像で表示します
+- 太字などの装飾は扱いません（貼り付けた HTML やブラウザが挿入した装飾要素は除去されます）
 
 ---
 
@@ -263,6 +281,7 @@ from,to
 | `lma.settings.v1` | 設定（speech / llm（API Key 含む）/ recognitionDictionary / preferences） |
 | `lma.context.v1` | Context（raw Markdown） |
 | `lma.session.v1` | 自動保存された会議データ（Transcript / Live Minutes / Advisor / Notes 等） |
+| IndexedDB `lma-images` | Notes に貼り付けた画像（LocalStorage の容量を圧迫しないよう別保存） |
 
 設定の保存形式（概要）:
 
@@ -276,7 +295,7 @@ from,to
 ```
 
 - 設定が破損していた場合はデフォルトに戻し（破損データは `lma.settings.v1.corrupt` に退避）、画面に通知します
-- 設定 → 会議 →「保存データをすべて削除」で上記キーを一括削除できます
+- 設定 → 会議 →「保存データをすべて削除」で上記キー・画像を一括削除できます。「新規」でも自動保存された会議データと画像は削除されます
 - LocalStorage の容量（約 5MB）を超えた場合は自動保存できない旨を通知します。長時間会議では適宜「保存」で HTML Snapshot を出力してください
 
 ---

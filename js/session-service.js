@@ -2,6 +2,7 @@
 // 設定（API Key を含む）とは別キーで保存する。
 
 import { isPlainObject } from './utils.js';
+import { parseNotesText, sanitizeNotesDoc } from './notes-editor.js';
 
 const SESSION_KEY = 'lma.session.v1';
 const CONTEXT_KEY = 'lma.context.v1';
@@ -37,6 +38,7 @@ export function saveSession(meetingState, status) {
     advisor: meetingState.advisor,
     minutesUpdatedAt: meetingState.minutesUpdatedAt,
     notes: meetingState.notes,
+    notesDoc: meetingState.notesDoc, // 画像本体は IndexedDB（image-store.js）
   };
   return safeSet(SESSION_KEY, JSON.stringify(data));
 }
@@ -74,6 +76,7 @@ export function loadSession() {
       advisor: isPlainObject(d.advisor) ? d.advisor : null,
       minutesUpdatedAt: Number(d.minutesUpdatedAt) || null,
       notes: typeof d.notes === 'string' ? d.notes : '',
+      notesDoc: Array.isArray(d.notesDoc) ? sanitizeNotesDoc(d.notesDoc) : parseNotesText(typeof d.notes === 'string' ? d.notes : ''),
     };
   } catch {
     clearSession();
@@ -82,7 +85,7 @@ export function loadSession() {
 }
 
 export function sessionHasContent(s) {
-  return !!(s && (s.transcript.length || s.notes.trim() || s.liveMinutes.length));
+  return !!(s && (s.transcript.length || s.notes.trim() || s.liveMinutes.length || s.notesDoc.some((l) => l.parts.length)));
 }
 
 export function clearSession() {

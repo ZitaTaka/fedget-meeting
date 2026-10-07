@@ -27,6 +27,8 @@ import { assertNoSecrets, buildExportData, buildSnapshotHtml, minutesFilename, s
 import { renderAdvisor, renderMeetingStateSummary, renderMinutesBlock, renderTranscriptLine } from './js/renderers.js';
 import { renderMarkdown } from './js/markdown.js';
 import { clearSession, loadContext, loadSession, saveContext, saveSession, sessionHasContent } from './js/session-service.js';
+import { NotesEditor, countNotesImages } from './js/notes-editor.js';
+import { clearImages, loadImages, syncImages } from './js/image-store.js';
 import { formatLogEntry, getLog, installGlobalErrorHandlers, notifyError, notifyInfo, notifySuccess, notifyWarning, onLog } from './js/notify.js';
 import { clearNode, debounce, downloadText, el, formatClock, formatDateTime, formatDuration, readTextFile, sanitizeFilename } from './js/utils.js';
 
@@ -36,6 +38,7 @@ const getSettings = () => settingsState.current;
 
 let assistant;
 let controller;
+let notesEditor;
 let renderedTranscriptCount = 0;
 const seenBlockVersions = new Map();
 let lastFinalResult = null;
@@ -53,6 +56,18 @@ async function init() {
   appState.speechSupported = isSpeechSupported(settings.speech.engine);
   assistant = new MeetingAssistant({ getSettings });
   controller = new MeetingController({ getSettings, assistant });
+  notesEditor = new NotesEditor($('notes'), { onError: (m) => notifyWarning(m) });
+  notesEditor.on('change', (doc) => {
+    meetingState.notesDoc = doc.lines;
+    meetingState.noteImages = doc.images;
+    meetingState.notes = doc.markdown;
+    renderNotesMeta();
+    scheduleSessionSave();
+  });
+  notesEditor.on('image-open', ({ src }) => {
+    $('image-view').setAttribute('src', src);
+    $('dlg-image').showModal();
+  });
 
   const savedCtx = loadContext();
   if (savedCtx && savedCtx.raw) applyContext(savedCtx.raw, savedCtx.fileName, { silent: true, updatedAt: savedCtx.updatedAt, persist: false });
@@ -95,21 +110,28 @@ function renderAll() {
   renderAdvisorPanel();
   renderContextIndicator();
   renderMeetingName();
-  renderNotesFromState();
+  renderNotesMeta();
   renderElapsed();
   renderLogCount();
 }
 
 // ───────────────────────── 状態購読 ─────────────────────────
 
+let imageSaveWarned = false;
 const scheduleSessionSave = debounce(() => {
-  const hasContent = meetingState.transcript.length || meetingState.notes.trim() || meetingState.liveMinutes.length || meetingState.startedAt;
+  const hasContent = meetingState.transcript.length || meetingState.notes.trim() || countNotesImages(meetingState.notesDoc) || meetingState.liveMinutes.length || meetingState.startedAt;
   if (!hasContent) {
     clearSession();
+    clearImages();
     return;
   }
   const res = saveSession(meetingState, appState.status);
   if (!res.ok && res.warn) notifyWarning(res.error);
+  syncImages(meetingState.noteImages).catch((err) => {
+    if (imageSaveWarned) return;
+    imageSaveWarned = true;
+    notifyWarning('メモ画像をブラウザに自動保存できませんでした（画面上・エクスポートには影響しません）', { detail: err.message });
+  });
 }, 1500);
 
 function subscribeState() {
@@ -176,6 +198,7 @@ function bindConsole() {
   });
 
   window.addEventListener('beforeunload', (e) => {
+    notesEditor.flush();
     scheduleSessionSave.flush();
     if ([STATUS.LISTENING, STATUS.PAUSED, STATUS.STARTING].includes(appState.status) && meetingState.transcript.length) {
       e.preventDefault();
@@ -200,7 +223,8 @@ async function onEndClick() {
 }
 
 async function onNewMeeting() {
-  const hasData = meetingState.transcript.length || meetingState.liveMinutes.length || meetingState.notes.trim();
+  notesEditor.flush();
+  const hasData = meetingState.transcript.length || meetingState.liveMinutes.length || meetingState.notes.trim() || countNotesImages(meetingState.notesDoc);
   if (hasData) {
     const choice = await confirmDialog('現在の会議データ（Transcript / Live Minutes / Advisor / Notes）を消去して新しい会議を準備します。\nContext と設定は維持されます。\n必要に応じて先に「保存」「議事録作成」を行ってください。', {
       title: '新規会議',
@@ -217,6 +241,7 @@ async function onNewMeeting() {
     notify('meeting');
   }
   clearSession();
+  clearImages();
   notifyInfo('新しい会議を準備しました');
 }
 
@@ -395,12 +420,14 @@ function bindPanels() {
     if (auto.checked) scrollToBottom($('transcript-body'));
   });
 
-  const notes = $('notes');
-  notes.addEventListener('input', () => {
-    meetingState.notes = notes.value;
-    renderNotesMeta();
-    scheduleSessionSave();
+  $('notes-body').addEventListener('mousedown', (e) => {
+    // パネル余白クリックでも末尾にカーソルを置く
+    if (e.target === $('notes-body')) {
+      e.preventDefault();
+      $('notes').focus();
+    }
   });
+  $('dlg-image').addEventListener('click', () => $('dlg-image').close());
 }
 
 function nearBottom(node) {
@@ -514,14 +541,16 @@ function renderAdvisorPanel() {
   );
 }
 
+/** 外部からの Notes 更新（新規会議・復元）をエディタへ反映 */
 function renderNotesFromState() {
-  const notes = $('notes');
-  if (notes.value !== meetingState.notes) notes.value = meetingState.notes;
+  notesEditor.setDoc(meetingState.notesDoc, meetingState.noteImages);
   renderNotesMeta();
 }
 
 function renderNotesMeta() {
-  $('notes-meta').textContent = meetingState.notes ? `${meetingState.notes.length}文字` : '';
+  const lines = meetingState.notesDoc.filter((l) => l.parts.length).length;
+  const images = countNotesImages(meetingState.notesDoc);
+  $('notes-meta').textContent = lines ? `${lines}項目${images ? ` ・ 画像${images}` : ''}` : '';
 }
 
 // ───────────────────────── UI ループ（タイマー・レベルメーター） ─────────────────────────
@@ -560,6 +589,7 @@ function startUiLoops() {
 // ───────────────────────── 保存（HTML Snapshot） ─────────────────────────
 
 function onSaveSnapshot() {
+  notesEditor.flush();
   try {
     const data = buildExportData({ appState, meetingState, contextState, settings: getSettings(), llmState });
     const html = buildSnapshotHtml(data, collectSecrets(getSettings()));
@@ -606,6 +636,7 @@ async function onCreateMinutes() {
   const dlg = $('dlg-minutes');
   if (!dlg.open) dlg.showModal();
   if (assistant.finalRunning) return;
+  notesEditor.flush();
   $('final-progress').hidden = false;
   $('final-status').textContent = '';
   $('btn-final-download').disabled = true;
@@ -1069,6 +1100,7 @@ async function onClearStorage() {
       if (k && k.startsWith('lma.')) keys.push(k);
     }
     keys.forEach((k) => localStorage.removeItem(k));
+    await clearImages();
   } catch (err) {
     notifyError('保存データを削除できませんでした', { detail: err.message });
     return;
@@ -1165,8 +1197,18 @@ async function maybeRestoreSession() {
     advisor: s.advisor,
     minutesUpdatedAt: s.minutesUpdatedAt,
     notes: s.notes,
+    notesDoc: s.notesDoc,
+    noteImages: {},
     interim: '',
   });
+  const imageIds = [...new Set(s.notesDoc.flatMap((l) => l.parts.filter((p) => p.t === 'img').map((p) => p.id)))];
+  try {
+    meetingState.noteImages = await loadImages(imageIds);
+  } catch (err) {
+    if (imageIds.length) notifyWarning('メモ画像を復元できませんでした', { detail: err.message });
+  }
+  renderNotesFromState();
+  notesEditor.flush();
   llmState.lastCycleAt = Date.now();
   if (s.startedAt && !s.endedAt) setStatus(STATUS.PAUSED, '前回のセッションを復元しました');
   else if (s.endedAt) setStatus(STATUS.ENDED);
@@ -1203,6 +1245,7 @@ function installDebugHooks() {
     },
     runCycle: () => assistant.runCycle({ manual: true }),
     applyContext: (raw) => applyContext(raw, 'debug.md'),
+    notesEditor,
     assistant,
     controller,
   };

@@ -333,18 +333,61 @@ code { font-family: var(--mono); font-size: 12px; background: #f1f3f6; padding: 
 .badge-prio-medium { color: #fff; background: #d97706; border-color: #d97706; }
 .badge-prio-low { background: #eef1f4; }
 
-/* Notes */
-.notes-input {
+/* Notes（contenteditable アウトライン） */
+.panel-body-notes { overflow-y: auto; background: #fffef8; }
+.notes-editor {
   flex: 1;
-  width: 100%;
-  resize: none;
-  border: 0;
-  padding: 8px 10px;
+  min-height: 100%;
+  padding: 6px 8px 24px 4px;
   font-size: 13px;
   line-height: 1.6;
-  background: #fffef8;
+  outline: none;
+  word-break: break-word;
+  white-space: pre-wrap;
+  cursor: text;
 }
-.notes-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.panel-notes:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.notes-editor .nl { position: relative; padding-left: calc(14px + var(--d, 0) * 16px); min-height: 1.6em; }
+.notes-editor .nl::before {
+  content: "•";
+  position: absolute;
+  left: calc(3px + var(--d, 0) * 16px);
+  color: #8a96a3;
+  font-weight: 700;
+}
+.notes-editor .nl[data-depth="1"] { --d: 1; }
+.notes-editor .nl[data-depth="2"] { --d: 2; }
+.notes-editor .nl[data-depth="3"] { --d: 3; }
+.notes-editor .nl[data-depth="4"] { --d: 4; }
+.notes-editor .nl[data-depth="5"] { --d: 5; }
+.notes-editor .nl[data-depth="1"]::before, .notes-editor .nl[data-depth="4"]::before { content: "◦"; }
+.notes-editor .nl[data-depth="2"]::before, .notes-editor .nl[data-depth="5"]::before { content: "▪"; font-size: 10px; line-height: 2.1; }
+.notes-editor.is-empty .nl:first-child::after {
+  content: "箇条書きでメモ（Tab で階層、画像は貼り付け可）。議事録作成時の入力にも含まれます。";
+  position: absolute;
+  left: 14px;
+  top: 0;
+  color: #a0aab4;
+  pointer-events: none;
+}
+.notes-editor .note-img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  margin: 2px 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: zoom-in;
+  background: #fff;
+}
+.panel-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 1px solid var(--line); color: var(--muted); font-size: 10.5px; font-weight: 700; cursor: help; flex: none;
+}
+.dialog-image { width: auto; max-width: calc(100vw - 32px); padding: 4px; background: #fff; cursor: zoom-out; }
+.dialog-image img { display: block; max-width: calc(100vw - 48px); max-height: calc(100dvh - 48px); }
+.md-img { display: block; max-width: 100%; max-height: 360px; margin: 4px 0; border: 1px solid var(--line); border-radius: 4px; }
 
 /* Spinner */
 .spinner {

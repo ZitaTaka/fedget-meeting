@@ -45,7 +45,9 @@ export function createMeetingState() {
     lastProcessedTranscriptIndex: 0,
     advisor: null, // { data, raw, updatedAt, local }
     minutesUpdatedAt: null,
-    notes: '',
+    notes: '', // Markdown 箇条書き（LLM 入力用、画像は [画像n]）
+    notesDoc: [], // Notes エディタの行モデル { depth, parts }
+    noteImages: {}, // 画像 id → data URL
   };
 }
 

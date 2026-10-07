@@ -117,9 +117,10 @@
       <header class="panel-header">
         <h2 id="h-notes">メモ <small>Notes</small></h2>
         <span id="notes-meta" class="panel-meta"></span>
+        <span class="panel-help" tabindex="0" title="Enter: 新しい項目&#10;Tab / Shift+Tab: 階層を下げる / 上げる&#10;空の項目で Enter・行頭で Backspace: 1 段戻す&#10;Shift+Enter: 項目内で改行&#10;画像: 貼り付け（Ctrl+V）またはドラッグ&ドロップ、ダブルクリックで拡大&#10;Ctrl+Z / Ctrl+Y: 元に戻す / やり直し">?</span>
       </header>
-      <div class="panel-body panel-body-notes">
-        <textarea id="notes" class="notes-input" spellcheck="false" placeholder="自由にメモを入力できます。&#10;メモは議事録作成時の入力にも含まれます。"></textarea>
+      <div class="panel-body panel-body-notes" id="notes-body">
+        <div id="notes" class="notes-editor" role="textbox" aria-multiline="true" aria-labelledby="h-notes" spellcheck="false"></div>
       </div>
     </section>
   </main>
@@ -322,6 +323,11 @@
         <button type="button" class="btn btn-primary" id="btn-confirm-ok">OK</button>
       </footer>
     </div>
+  </dialog>
+
+  <!-- ===================== Image viewer ===================== -->
+  <dialog id="dlg-image" class="dialog dialog-image" aria-label="画像">
+    <img id="image-view" alt="メモ画像">
   </dialog>
 
   <!-- ===================== Log ===================== -->

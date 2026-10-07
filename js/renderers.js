@@ -3,6 +3,7 @@
 
 import { el, formatClock } from './utils.js';
 import { renderMarkdown } from './markdown.js';
+import { isSafeImageDataUrl } from './notes-editor.js';
 
 export const MINUTES_SECTIONS = [
   ['presentedInformation', '提示情報'],
@@ -228,4 +229,42 @@ export function renderAdvisor(advisor) {
 export function renderAdvisorMeta(advisor) {
   if (!advisor?.updatedAt) return '';
   return `更新 ${formatClock(advisor.updatedAt)}`;
+}
+
+/** Notes（行モデル）→ 入れ子の箇条書き（Snapshot 用）。画像は data:image のみ表示 */
+export function renderNotesDoc(lines, images = {}) {
+  const root = el('ul', { class: 'notes-doc' });
+  const stack = [{ depth: 0, list: root }];
+  for (const line of lines || []) {
+    const hasContent = line.parts.some((p) => (p.t === 'text' ? p.v.trim() : true));
+    if (!hasContent) continue;
+    // 親階層の li がない深さは 1 段ずつ補完
+    while (stack.length - 1 < line.depth) {
+      const top = stack[stack.length - 1];
+      let li = top.list.lastElementChild;
+      if (!li) {
+        li = el('li', { class: 'notes-gap' });
+        top.list.append(li);
+      }
+      const ul = el('ul');
+      li.append(ul);
+      stack.push({ depth: stack.length, list: ul });
+    }
+    while (stack.length - 1 > line.depth) stack.pop();
+    const li = el('li');
+    for (const p of line.parts) {
+      if (p.t === 'text') {
+        p.v.split('\n').forEach((seg, i) => {
+          if (i) li.append(el('br'));
+          li.append(seg);
+        });
+      } else if (p.t === 'img' && isSafeImageDataUrl(images[p.id])) {
+        const img = el('img', { class: 'note-img', alt: 'メモ画像' });
+        img.setAttribute('src', images[p.id]);
+        li.append(img);
+      }
+    }
+    stack[stack.length - 1].list.append(li);
+  }
+  return root;
 }
