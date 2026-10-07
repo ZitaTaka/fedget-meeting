@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: http:; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>LLM Meeting Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="js/env-check.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="env-banner" class="env-banner" role="alert" hidden></div>
+
+  <!-- ===================== Console ===================== -->
+  <header class="console" id="console">
+    <div class="console-row console-main">
+      <div class="brand" title="LLM Meeting Assistant">Meeting<br>Assistant</div>
+
+      <label class="meeting-name">
+        <span class="sr-only">会議名</span>
+        <input id="meeting-name" type="text" placeholder="会議名を入力（Context の会議名を自動反映）" maxlength="120" autocomplete="off">
+      </label>
+
+      <div id="status-badge" class="status-badge" data-status="ready" role="status" aria-live="polite">
+        <span class="status-dot"></span><span id="status-text">Ready</span>
+      </div>
+
+      <div class="elapsed" title="会議経過時間（開始からの実時間）／想定会議時間">
+        <span class="elapsed-label">経過</span>
+        <span id="elapsed" class="elapsed-time">00:00:00</span>
+        <span id="planned" class="elapsed-planned">/ 60分</span>
+      </div>
+
+      <div class="btn-group" role="group" aria-label="会議操作">
+        <button id="btn-start" type="button" class="btn btn-primary btn-wide">▶ 開始</button>
+        <button id="btn-end" type="button" class="btn" title="会議を終了し、マイク・画面共有を解放します" disabled>■ 終了</button>
+      </div>
+
+      <div class="btn-group" role="group" aria-label="出力">
+        <button id="btn-save" type="button" class="btn" title="現在の会議状態を HTML Snapshot としてダウンロード（API Key は含みません）">保存</button>
+        <button id="btn-minutes" type="button" class="btn" title="LLM で最終議事録（Markdown）を作成してダウンロード">議事録作成</button>
+      </div>
+
+      <div class="btn-group" role="group" aria-label="Context">
+        <button id="btn-context-upload" type="button" class="btn" title=".md / .txt を読み込み">Context Upload</button>
+        <button id="btn-context-download" type="button" class="btn" title="現在の Context を Markdown で保存（未登録時はテンプレート）">Context Download</button>
+        <button id="btn-context-edit" type="button" class="btn" title="Context を表示・編集">Context編集</button>
+        <input type="file" id="file-context" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
+      </div>
+
+      <div class="btn-group btn-group-right" role="group" aria-label="その他">
+        <button id="btn-new" type="button" class="btn btn-ghost" title="会議データを消去して新しい会議を準備（Context・設定は維持）">新規</button>
+        <button id="btn-settings" type="button" class="btn">⚙ 設定</button>
+      </div>
+    </div>
+
+    <div class="console-row status-bar" aria-label="状態">
+      <span class="ind" id="ind-recog" data-state="off" title="音声認識の状態"><span class="ind-dot"></span><span class="ind-label">認識</span><span class="ind-value">停止中</span></span>
+      <span class="ind" id="ind-mic" data-state="off" title="マイクの状態">
+        <span class="ind-dot"></span><span class="ind-label">Mic</span><span class="ind-value">未使用</span>
+        <span class="meter" aria-hidden="true"><span class="meter-fill" id="meter-mic"></span></span>
+      </span>
+      <span class="ind" id="ind-system" data-state="off" title="System Audio（画面・タブ共有の音声）の状態">
+        <span class="ind-dot"></span><span class="ind-label">System</span><span class="ind-value">未使用</span>
+        <span class="meter" aria-hidden="true"><span class="meter-fill" id="meter-system"></span></span>
+      </span>
+      <span class="ind" id="ind-lang" data-state="neutral" title="認識言語"><span class="ind-label">言語</span><span class="ind-value">-</span></span>
+      <span class="ind" id="ind-llm" data-state="off" title="LLM 接続状態"><span class="ind-dot"></span><span class="ind-label">LLM</span><span class="ind-value">未設定</span></span>
+      <span class="ind" id="ind-llm-time" data-state="neutral" title="直近の LLM 更新時刻 / 次回更新"><span class="ind-label">最終更新</span><span class="ind-value">-</span></span>
+      <button id="btn-llm-now" type="button" class="btn btn-xs" title="Live Minutes / Advisor を今すぐ更新">今すぐ更新</button>
+      <span class="ind" id="ind-context" data-state="neutral" title="Context の登録状態"><span class="ind-label">Context</span><span class="ind-value">未登録</span></span>
+      <span id="audio-note" class="audio-note" hidden></span>
+      <button id="btn-log" type="button" class="btn btn-xs btn-ghost" title="通知ログ">ログ <span id="log-count" class="log-count"></span></button>
+    </div>
+  </header>
+
+  <!-- ===================== Panels ===================== -->
+  <main class="panels">
+    <section class="panel panel-transcript" aria-labelledby="h-transcript">
+      <header class="panel-header">
+        <h2 id="h-transcript">音声認識 <small>Transcript</small></h2>
+        <span id="transcript-count" class="panel-meta">0件</span>
+        <label class="panel-toggle" title="新しい発言で自動スクロール"><input type="checkbox" id="chk-autoscroll" checked> 自動</label>
+      </header>
+      <div class="panel-body" id="transcript-body">
+        <div id="transcript-empty" class="empty">「開始」を押すと音声認識を開始します。<br>確定した発言は時刻付きでここに追加され、認識途中の文字は薄く表示されます。</div>
+        <div id="transcript-list" class="transcript-list"></div>
+        <div id="transcript-interim" class="interim" aria-live="off"></div>
+      </div>
+    </section>
+
+    <section class="panel panel-minutes" aria-labelledby="h-minutes">
+      <header class="panel-header">
+        <h2 id="h-minutes">リアルタイム議事 <small>Live Minutes</small></h2>
+        <span id="minutes-meta" class="panel-meta"></span>
+        <span id="minutes-busy" class="spinner" hidden title="LLM 処理中"></span>
+      </header>
+      <div class="panel-body" id="minutes-body">
+        <div id="minutes-state"></div>
+        <div id="minutes-empty" class="empty">会議中、新しい発言が増えると一定間隔（既定 60 秒）で LLM が議事ブロックを追記します。<br>LLM 未設定の場合は ⚙ 設定 から OpenAI / Gemini を設定してください。</div>
+        <div id="minutes-list" class="minutes-list"></div>
+      </div>
+    </section>
+
+    <section class="panel panel-advisor" aria-labelledby="h-advisor">
+      <header class="panel-header">
+        <h2 id="h-advisor">会議アドバイザー <small>Meeting Advisor</small></h2>
+        <span id="advisor-meta" class="panel-meta"></span>
+        <span id="advisor-busy" class="spinner" hidden title="LLM 処理中"></span>
+      </header>
+      <div class="panel-body" id="advisor-body"></div>
+    </section>
+
+    <section class="panel panel-notes" aria-labelledby="h-notes">
+      <header class="panel-header">
+        <h2 id="h-notes">メモ <small>Notes</small></h2>
+        <span id="notes-meta" class="panel-meta"></span>
+      </header>
+      <div class="panel-body panel-body-notes">
+        <textarea id="notes" class="notes-input" spellcheck="false" placeholder="自由にメモを入力できます。&#10;メモは議事録作成時の入力にも含まれます。"></textarea>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- ===================== Settings ===================== -->
+  <dialog id="dlg-settings" class="dialog dialog-wide" aria-labelledby="settings-title">
+    <form method="dialog" class="dialog-form" id="settings-form" novalidate>
+      <header class="dialog-header">
+        <h2 id="settings-title">設定</h2>
+        <nav class="tabs" role="tablist">
+          <button type="button" class="tab active" role="tab" data-tab="speech">音声</button>
+          <button type="button" class="tab" role="tab" data-tab="dictionary">誤認識辞書</button>
+          <button type="button" class="tab" role="tab" data-tab="llm">LLM</button>
+          <button type="button" class="tab" role="tab" data-tab="meeting">会議</button>
+        </nav>
+      </header>
+
+      <div class="dialog-body">
+        <!-- 音声 -->
+        <section class="tab-panel" data-panel="speech">
+          <div class="field">
+            <label for="set-engine">音声認識エンジン</label>
+            <select id="set-engine"></select>
+            <p class="hint">現在は Web Speech API のみ。将来別エンジンへ差し替え可能な構造です。</p>
+          </div>
+          <div class="field">
+            <label for="set-language">認識言語</label>
+            <select id="set-language"></select>
+            <p class="hint">Auto は音声からの自動判定ではありません（HTML lang → ブラウザ言語 → ja-JP の順で決定）。</p>
+          </div>
+          <fieldset class="field">
+            <legend>入力モード</legend>
+            <label class="radio"><input type="radio" name="inputMode" value="microphone"> Microphone</label>
+            <label class="radio"><input type="radio" name="inputMode" value="system"> System Audio</label>
+            <label class="radio"><input type="radio" name="inputMode" value="mix"> Microphone + System Audio</label>
+            <p class="hint">System Audio を使うモードは、音声トラック直接入力（SpeechRecognition.start(track)）対応ブラウザでのみ有効です。未対応の場合はマイク認識へフォールバックします。</p>
+          </fieldset>
+          <div class="field">
+            <label for="set-mic">マイク</label>
+            <div class="row">
+              <select id="set-mic"></select>
+              <button type="button" class="btn btn-sm" id="btn-mic-refresh">一覧を更新</button>
+            </div>
+            <p class="hint" id="mic-hint">デバイス名を表示するにはマイク権限が必要です。</p>
+          </div>
+          <div class="field">
+            <span class="label">System Audio：画面・タブ共有から取得</span>
+            <p class="hint">開始時にブラウザの共有ダイアログで「タブ」「ウィンドウ」「画面全体」を選択します。共有対象に音声がある場合のみ取得できます（Chrome / Edge ではタブ共有で「タブの音声も共有」、画面全体で「システム音声を共有」を有効化）。OS のスピーカー出力を直接指定してキャプチャすることはできません。</p>
+            <div class="row">
+              <button type="button" class="btn btn-sm" id="btn-system-test">System Audio 取得テスト</button>
+              <span id="system-test-result" class="test-result"></span>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">音声トラック直接入力への対応</span>
+            <div class="row">
+              <span id="track-support" class="test-result">未確認</span>
+              <button type="button" class="btn btn-sm" id="btn-track-probe">確認する</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 誤認識辞書 -->
+        <section class="tab-panel" data-panel="dictionary" hidden>
+          <p class="hint">音声認識の確定結果（Final）に対して、from → to の機械的な文字列置換を行います（from の長いものから優先）。CSV 形式（UTF-8）: <code>from,to</code></p>
+          <div class="row">
+            <button type="button" class="btn btn-sm" id="btn-dict-upload">CSV Upload</button>
+            <button type="button" class="btn btn-sm" id="btn-dict-download">CSV Download</button>
+            <span id="dict-count" class="test-result"></span>
+            <input type="file" id="file-dict" accept=".csv,text/csv,text/plain" hidden>
+          </div>
+          <div class="field">
+            <label for="dict-text">辞書（CSV を直接編集できます。保存時に反映）</label>
+            <textarea id="dict-text" class="mono" rows="12" spellcheck="false"></textarea>
+            <p class="hint" id="dict-errors"></p>
+          </div>
+          <div class="field">
+            <label for="dict-test">置換テスト</label>
+            <div class="row">
+              <input type="text" id="dict-test" placeholder="例: クロードコードでオープンエーアイを呼ぶ">
+            </div>
+            <p class="hint">結果: <span id="dict-test-result">-</span></p>
+          </div>
+        </section>
+
+        <!-- LLM -->
+        <section class="tab-panel" data-panel="llm" hidden>
+          <div class="field">
+            <label for="set-provider">LLM Provider</label>
+            <select id="set-provider"></select>
+          </div>
+          <div class="field">
+            <label for="set-baseurl">Base URL</label>
+            <input type="url" id="set-baseurl" autocomplete="off" spellcheck="false">
+            <p class="hint" id="baseurl-hint"></p>
+          </div>
+          <div class="field">
+            <label for="set-apikey">API Key</label>
+            <input type="password" id="set-apikey" autocomplete="off" spellcheck="false">
+            <p class="hint warn">API Key はこのブラウザの LocalStorage に平文で保存されます（MVP 用の簡易方式）。共有 PC では使用しないでください。HTML Snapshot には含まれません。</p>
+          </div>
+          <div class="field">
+            <label for="set-model">Model</label>
+            <input type="text" id="set-model" autocomplete="off" spellcheck="false">
+            <p class="hint" id="model-hint">使用するモデル名を入力してください。</p>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-sm" id="btn-llm-test">接続テスト</button>
+            <span id="llm-test-result" class="test-result"></span>
+          </div>
+        </section>
+
+        <!-- 会議 -->
+        <section class="tab-panel" data-panel="meeting" hidden>
+          <div class="field">
+            <label for="set-duration">想定会議時間（分）</label>
+            <input type="number" id="set-duration" min="5" max="720" step="5">
+            <p class="hint">Context に「## 想定会議時間」がある場合はそちらを優先します。</p>
+          </div>
+          <div class="field">
+            <label for="set-interval">LLM 更新間隔（秒）</label>
+            <input type="number" id="set-interval" min="15" max="600" step="5">
+            <p class="hint">新しい確定発言がある場合のみ、この間隔で Live Minutes → Advisor を更新します（既定 60 秒）。</p>
+          </div>
+          <div class="field">
+            <span class="label">データ</span>
+            <div class="row">
+              <button type="button" class="btn btn-sm btn-danger" id="btn-clear-storage">保存データをすべて削除</button>
+            </div>
+            <p class="hint">設定（API Key 含む）・辞書・Context・自動保存された会議データをこのブラウザから削除します。</p>
+          </div>
+        </section>
+      </div>
+
+      <footer class="dialog-footer">
+        <span id="settings-status" class="test-result"></span>
+        <button type="button" class="btn" id="btn-settings-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="btn-settings-save">保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ===================== Context ===================== -->
+  <dialog id="dlg-context" class="dialog dialog-wide" aria-labelledby="context-title">
+    <div class="dialog-form">
+      <header class="dialog-header">
+        <h2 id="context-title">Context（会議前情報 / Markdown）</h2>
+        <span id="context-file" class="panel-meta"></span>
+      </header>
+      <div class="dialog-body context-body">
+        <div class="context-editor">
+          <textarea id="context-text" class="mono" spellcheck="false" placeholder="Markdown で会議前情報を記入します。「テンプレート挿入」で標準テンプレートを入力できます。"></textarea>
+        </div>
+        <div class="context-preview">
+          <h3>解析結果</h3>
+          <div id="context-parsed" class="context-parsed"></div>
+        </div>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="btn btn-sm" id="btn-ctx-template">テンプレート挿入</button>
+        <button type="button" class="btn btn-sm" id="btn-ctx-upload">Upload</button>
+        <button type="button" class="btn btn-sm" id="btn-ctx-download">Download</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-ctx-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="btn-ctx-save">保存</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ===================== Final Minutes ===================== -->
+  <dialog id="dlg-minutes" class="dialog dialog-wide" aria-labelledby="minutes-title">
+    <div class="dialog-form">
+      <header class="dialog-header">
+        <h2 id="minutes-title">議事録</h2>
+        <span id="final-status" class="panel-meta"></span>
+      </header>
+      <div class="dialog-body">
+        <div id="final-progress" class="progress" hidden><span class="spinner"></span> LLM で議事録を作成しています…（会議中の認識は継続します）</div>
+        <div id="final-preview" class="md final-preview"></div>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="btn btn-sm" id="btn-final-copy" disabled>Markdown をコピー</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-final-close">閉じる</button>
+        <button type="button" class="btn btn-primary" id="btn-final-download" disabled>再ダウンロード</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ===================== Confirm ===================== -->
+  <dialog id="dlg-confirm" class="dialog dialog-narrow" aria-labelledby="confirm-title">
+    <div class="dialog-form">
+      <header class="dialog-header"><h2 id="confirm-title">確認</h2></header>
+      <div class="dialog-body"><p id="confirm-message" class="confirm-message"></p></div>
+      <footer class="dialog-footer">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-confirm-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-ok">OK</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ===================== Log ===================== -->
+  <dialog id="dlg-log" class="dialog dialog-wide" aria-labelledby="log-title">
+    <div class="dialog-form">
+      <header class="dialog-header"><h2 id="log-title">通知ログ</h2></header>
+      <div class="dialog-body"><ol id="log-list" class="log-list"></ol></div>
+      <footer class="dialog-footer">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-log-close">閉じる</button>
+      </footer>
+    </div>
+  </dialog>
+</body>
+</html>
