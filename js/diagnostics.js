@@ -90,6 +90,22 @@ export async function runStaticDiagnostics({ language = 'auto' } = {}) {
   add('API', '画面・タブ共有 (getDisplayMedia)', md?.getDisplayMedia ? 'ok' : 'warn', md?.getDisplayMedia ? '対応' : '非対応', md?.getDisplayMedia ? '' : 'System Audio は使えません（Microphone モードを使用）。スマートフォンは非対応です。');
   add('API', '音声認識 (Web Speech API)', SR ? 'ok' : 'error', SR ? (window.SpeechRecognition ? 'SpeechRecognition' : 'webkitSpeechRecognition') : '非対応',
     SR ? '' : 'Chrome または Edge を使用してください（Firefox は非対応）。');
+  // ブラウザ標準 API が拡張機能等で置き換えられていないか（企業のセキュリティ拡張機能が上書きする場合がある）
+  const isNative = (fn) => {
+    try {
+      return typeof fn === 'function' && /\[native code\]/.test(Function.prototype.toString.call(fn));
+    } catch {
+      return false;
+    }
+  };
+  const overridden = [
+    ['getUserMedia', md?.getUserMedia],
+    ['getDisplayMedia', md?.getDisplayMedia],
+    ['enumerateDevices', md?.enumerateDevices],
+    ['SpeechRecognition', SR],
+  ].filter(([, fn]) => fn && !isNative(fn)).map(([n]) => n);
+  add('API', 'ブラウザ標準 API の改変', overridden.length ? 'warn' : 'ok', overridden.length ? `置き換えあり: ${overridden.join(', ')}` : 'なし（標準のまま）',
+    overridden.length ? '拡張機能（企業のセキュリティ / DLP 拡張機能など）が API を置き換えています。許可されたサイト以外でマイク・画面共有をブロックしている可能性があります。' : '');
   add('API', 'Web Audio (AudioContext)', window.AudioContext || window.webkitAudioContext ? 'ok' : 'warn', window.AudioContext || window.webkitAudioContext ? '対応' : '非対応');
   let lsOk = false;
   try {
