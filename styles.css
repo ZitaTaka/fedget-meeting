@@ -549,3 +549,19 @@ code { font-family: var(--mono); font-size: 12px; background: #f1f3f6; padding: 
   .meeting-name { max-width: none; flex-basis: 100%; }
   .context-body { grid-template-columns: 1fr; }
 }
+
+/* Diagnostics */
+.diag-actions { max-width: none; margin-bottom: 10px; }
+.meter-lg { width: 90px; height: 8px; }
+.diag-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.diag-table th, .diag-table td { border-bottom: 1px solid var(--line-soft); padding: 4px 6px; text-align: left; vertical-align: top; }
+.diag-table th { background: var(--panel-head); font-weight: 600; color: var(--fg-soft); }
+.diag-table td:nth-child(1) { color: var(--muted); white-space: nowrap; }
+.diag-table td:nth-child(2) { white-space: pre; }
+.diag-table td:nth-child(4) { color: var(--fg-soft); }
+.diag-status { display: inline-block; min-width: 3.2em; text-align: center; border-radius: 3px; font-size: 11px; font-weight: 700; padding: 0 4px; margin-right: 6px; }
+.diag-ok .diag-status { background: var(--ok-soft); color: var(--ok); }
+.diag-warn .diag-status { background: var(--warn-soft); color: var(--warn); }
+.diag-error .diag-status { background: var(--danger-soft); color: var(--danger); }
+.diag-info .diag-status { background: #eef1f4; color: var(--muted); }
+.diag-error td:nth-child(4) { color: var(--danger); }

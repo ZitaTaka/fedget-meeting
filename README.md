@@ -64,6 +64,7 @@
 │  ├─ session-service.js      会議データ・Context の自動保存
 │  ├─ notes-editor.js         Notes エディタ（箇条書き・階層・画像・独自 Undo）
 │  ├─ image-store.js          メモ画像の自動保存（IndexedDB）
+│  ├─ diagnostics.js          環境診断（マイク・音声認識・画面共有の切り分け）
 │  ├─ notify.js               トースト・通知ログ
 │  ├─ utils.js                共通ユーティリティ
 │  └─ env-check.js            起動環境チェック（file:// / 非セキュアコンテキストの警告）
@@ -310,6 +311,26 @@ from,to
 - LLM 出力・Transcript は `innerHTML` を使わず `textContent` / DOM API で描画します。Markdown も独自の安全なレンダラで DOM を構築し、リンクは http / https のみ許可します
 - `index.html` は Content Security Policy でスクリプトを自ホストのみに制限しています。Snapshot はスクリプトを一切実行しない CSP 付きの静的 HTML です
 - LLM の出力は誤りを含む可能性があります。決定事項・担当者・期限は必ず人が確認してください
+
+---
+
+## 動かないときは（診断）
+
+状態バーの **「診断」** ボタンで、ブラウザ・OS・セキュアコンテキスト・各 API の対応、マイク権限、検出された入力デバイスを一覧表示します。さらに次のテストを実行できます（結果は外部に送信されません。「結果をコピー」で共有可能）。
+
+1. **マイクを試す** … 最小構成でマイクを取得し 3 秒間の入力レベルを測定
+2. **音声認識を試す** … Web Speech API で実際に 1 フレーズ認識
+3. **System Audio を試す** … 画面・タブ共有から音声を取得
+
+よくある原因（Windows）:
+
+| 症状 | 確認すること |
+|---|---|
+| 音声入力デバイスが 0 件 / NotFoundError | 設定 → システム → サウンド → 入力 にマイクがあるか。設定 → プライバシーとセキュリティ → マイク の「マイクへのアクセス」「デスクトップアプリにマイクへのアクセスを許可する」がオンか |
+| NotAllowedError | アドレスバー左のサイト情報 → マイクを許可。OS のプライバシー設定 |
+| NotSupportedError | マイクが 1 つもない PC、リモートデスクトップ / VDI（音声転送なし）、管理ポリシー（`chrome://policy` / `edge://policy` の AudioCaptureAllowed / ScreenCaptureAllowed）、アプリ内ブラウザ |
+| NotReadableError | 他アプリ（Teams / Zoom 等）がマイクを占有、ドライバの問題 |
+| 音声認識テストで network エラー | 音声認識サービス（クラウド）への通信がプロキシ・ファイアウォールで遮断 |
 
 ---
 

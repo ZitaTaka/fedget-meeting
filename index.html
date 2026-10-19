@@ -72,6 +72,7 @@
       <button id="btn-llm-now" type="button" class="btn btn-xs" title="Live Minutes / Advisor を今すぐ更新">今すぐ更新</button>
       <span class="ind" id="ind-context" data-state="neutral" title="Context の登録状態"><span class="ind-label">Context</span><span class="ind-value">未登録</span></span>
       <span id="audio-note" class="audio-note" hidden></span>
+      <button id="btn-diag" type="button" class="btn btn-xs" title="マイク・音声認識・画面共有が動かない原因を調べます">診断</button>
       <button id="btn-log" type="button" class="btn btn-xs btn-ghost" title="通知ログ">ログ <span id="log-count" class="log-count"></span></button>
     </div>
   </header>
@@ -328,6 +329,35 @@
   <!-- ===================== Image viewer ===================== -->
   <dialog id="dlg-image" class="dialog dialog-image" aria-label="画像">
     <img id="image-view" alt="メモ画像">
+  </dialog>
+
+  <!-- ===================== Diagnostics ===================== -->
+  <dialog id="dlg-diag" class="dialog dialog-wide" aria-labelledby="diag-title">
+    <div class="dialog-form">
+      <header class="dialog-header">
+        <h2 id="diag-title">診断</h2>
+        <span class="panel-meta">マイク・音声認識・画面共有が動かない原因を切り分けます（結果は外部に送信されません）</span>
+      </header>
+      <div class="dialog-body">
+        <div class="row diag-actions">
+          <button type="button" class="btn btn-sm" id="btn-diag-mic">① マイクを試す（3 秒）</button>
+          <span class="meter meter-lg" aria-hidden="true"><span class="meter-fill" id="diag-meter"></span></span>
+          <button type="button" class="btn btn-sm" id="btn-diag-speech">② 音声認識を試す（話してください）</button>
+          <button type="button" class="btn btn-sm" id="btn-diag-system">③ System Audio を試す</button>
+          <span id="diag-running" class="test-result"></span>
+        </div>
+        <table class="diag-table">
+          <thead><tr><th>区分</th><th>項目</th><th>結果</th><th>詳細・対処</th></tr></thead>
+          <tbody id="diag-body"></tbody>
+        </table>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="btn btn-sm" id="btn-diag-rerun">再診断</button>
+        <button type="button" class="btn btn-sm" id="btn-diag-copy">結果をコピー</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btn-diag-close">閉じる</button>
+      </footer>
+    </div>
   </dialog>
 
   <!-- ===================== Log ===================== -->

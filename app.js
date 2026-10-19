@@ -28,6 +28,7 @@ import { renderAdvisor, renderMeetingStateSummary, renderMinutesBlock, renderTra
 import { renderMarkdown } from './js/markdown.js';
 import { clearSession, loadContext, loadSession, saveContext, saveSession, sessionHasContent } from './js/session-service.js';
 import { NotesEditor, countNotesImages } from './js/notes-editor.js';
+import { formatDiagnostics, runStaticDiagnostics, testMicrophone, testSpeechRecognition } from './js/diagnostics.js';
 import { clearImages, loadImages, syncImages } from './js/image-store.js';
 import { formatLogEntry, getLog, installGlobalErrorHandlers, notifyError, notifyInfo, notifySuccess, notifyWarning, onLog } from './js/notify.js';
 import { clearNode, debounce, downloadText, el, formatClock, formatDateTime, formatDuration, readTextFile, sanitizeFilename } from './js/utils.js';
@@ -78,6 +79,7 @@ async function init() {
   bindContextDialog();
   bindMinutesDialog();
   bindLogDialog();
+  bindDiagnosticsDialog();
   subscribeState();
 
   audioState.language = resolveLanguage(settings.speech.language);
@@ -1152,6 +1154,105 @@ function confirmDialog(message, { title = '確認', okText = 'OK', cancelText = 
     dlg.addEventListener('close', onClose);
     dlg.showModal();
     (danger ? cancel : ok).focus();
+  });
+}
+
+// ───────────────────────── 診断 ─────────────────────────
+
+let diagItems = [];
+const diagTests = new Map(); // テスト結果（再診断でも保持）
+
+function renderDiagnostics() {
+  const body = $('diag-body');
+  clearNode(body);
+  const STATUS_TEXT = { ok: 'OK', warn: '注意', error: 'NG', info: '-' };
+  const all = [...diagItems, ...diagTests.values()];
+  for (const it of all) {
+    body.append(
+      el('tr', { class: `diag-${it.status}` }, [
+        el('td', { text: it.group }),
+        el('td', { text: it.label }),
+        el('td', {}, [el('span', { class: 'diag-status', text: STATUS_TEXT[it.status] || '-' }), it.value]),
+        el('td', { text: it.hint || '' }),
+      ])
+    );
+  }
+}
+
+async function runDiagnostics() {
+  $('diag-running').textContent = '診断中…';
+  try {
+    diagItems = await runStaticDiagnostics({ language: getSettings().speech.language });
+    const s = getSettings();
+    const llm = getActiveLLMConfig(s);
+    diagItems.push({ group: '設定', label: '入力モード', status: 'info', value: { microphone: 'Microphone', system: 'System Audio', mix: 'Microphone + System Audio' }[s.speech.inputMode],
+      hint: s.speech.inputMode !== 'microphone' && !navigator.mediaDevices?.getDisplayMedia ? 'この環境は画面共有に非対応のため、Microphone に変更してください。' : '' });
+    diagItems.push({ group: '設定', label: '音声トラック直接入力', status: 'info', value: audioState.trackInputSupport });
+    diagItems.push({ group: '設定', label: 'LLM', status: llmState.connection === 'unconfigured' ? 'warn' : 'info', value: `${llm.provider}${llm.model ? ` / ${llm.model}` : ''}（${llmState.connection}）`,
+      hint: llmState.connection === 'unconfigured' ? llmState.lastError || '設定 → LLM で設定してください。' : '' });
+  } catch (err) {
+    diagItems = [{ group: '診断', label: '実行', status: 'error', value: err.message }];
+  }
+  $('diag-running').textContent = '';
+  renderDiagnostics();
+}
+
+function bindDiagnosticsDialog() {
+  $('btn-diag').addEventListener('click', () => {
+    $('dlg-diag').showModal();
+    runDiagnostics();
+  });
+  $('btn-diag-close').addEventListener('click', () => $('dlg-diag').close());
+  $('btn-diag-rerun').addEventListener('click', runDiagnostics);
+  $('btn-diag-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(formatDiagnostics([...diagItems, ...diagTests.values()]));
+      notifySuccess('診断結果をコピーしました');
+    } catch (err) {
+      notifyError('コピーできませんでした', { detail: err.message });
+    }
+  });
+  const busyGuard = () => {
+    if ([STATUS.LISTENING, STATUS.STARTING].includes(appState.status)) {
+      notifyWarning('会議中はテストできません。一時停止してから実行してください');
+      return true;
+    }
+    return false;
+  };
+  const setBusy = (text) => {
+    $('diag-running').textContent = text;
+    ['btn-diag-mic', 'btn-diag-speech', 'btn-diag-system'].forEach((id) => {
+      $(id).disabled = !!text;
+    });
+  };
+  $('btn-diag-mic').addEventListener('click', async () => {
+    if (busyGuard()) return;
+    setBusy('マイクを確認中…（何か話してください）');
+    const res = await testMicrophone({ onLevel: (lv) => { $('diag-meter').style.width = `${Math.round(lv * 100)}%`; } });
+    diagTests.set('mic', { group: 'テスト', label: '① マイク取得', ...res });
+    setBusy('');
+    await runDiagnostics(); // 権限・デバイス名が変わるため再取得
+  });
+  $('btn-diag-speech').addEventListener('click', async () => {
+    if (busyGuard()) return;
+    setBusy('音声認識を確認中…（「テスト」などと話してください）');
+    const res = await testSpeechRecognition({ lang: resolveLanguage(getSettings().speech.language), onEvent: (e) => { $('diag-running').textContent = `音声認識を確認中… ${e}`; } });
+    diagTests.set('speech', { group: 'テスト', label: '② 音声認識', status: res.status, value: res.value, hint: [res.hint, res.events?.length ? `イベント: ${res.events.join(' → ')}` : ''].filter(Boolean).join(' / ') });
+    setBusy('');
+    renderDiagnostics();
+  });
+  $('btn-diag-system').addEventListener('click', async () => {
+    if (busyGuard()) return;
+    setBusy('共有する画面・タブを選択してください…');
+    try {
+      const info = await controller.audio.testSystemAudio();
+      diagTests.set('system', { group: 'テスト', label: '③ System Audio', status: 'ok', value: `取得成功: ${info.label}（${info.surface || 'surface 不明'}）` });
+    } catch (err) {
+      diagTests.set('system', { group: 'テスト', label: '③ System Audio', status: err.code === 'screen_denied' ? 'warn' : 'error', value: err.message,
+        hint: err.code === 'display_unsupported' ? 'この環境では System Audio は使えません。入力モードを Microphone にしてください。' : '' });
+    }
+    setBusy('');
+    renderDiagnostics();
   });
 }
 

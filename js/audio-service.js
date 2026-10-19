@@ -6,6 +6,7 @@
 //   'mic-ended'    { label }
 
 import { Emitter } from './utils.js';
+import { micErrorHint } from './diagnostics.js';
 
 export class AudioError extends Error {
   constructor(code, message, cause) {
@@ -22,16 +23,13 @@ function mapMediaError(err, kind) {
   const name = err && err.name;
   const detail = err && err.message ? `（${err.name}: ${err.message}）` : '';
   if (kind === 'mic') {
-    if (name === 'NotAllowedError' || name === 'SecurityError') {
-      return new AudioError('mic_denied', `マイクの利用が拒否されました。ブラウザのアドレスバー左のサイト設定からマイクを許可してください${detail}`, err);
-    }
-    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-      return new AudioError('mic_not_found', `マイクが見つかりません${detail}`, err);
-    }
-    if (name === 'NotReadableError' || name === 'AbortError') {
-      return new AudioError('mic_busy', `マイクを使用できません（他のアプリが使用中の可能性）${detail}`, err);
-    }
-    return new AudioError('mic_error', `マイクの取得に失敗しました${detail}`, err);
+    const hint = micErrorHint(name);
+    const tail = `${detail}${hint ? ` ${hint}` : ''}（「診断」で詳しく確認できます）`;
+    if (name === 'NotAllowedError' || name === 'SecurityError') return new AudioError('mic_denied', `マイクの利用が拒否されました${tail}`, err);
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') return new AudioError('mic_not_found', `マイクが見つかりません${tail}`, err);
+    if (name === 'NotReadableError' || name === 'AbortError') return new AudioError('mic_busy', `マイクを使用できません${tail}`, err);
+    if (name === 'NotSupportedError') return new AudioError('mic_unavailable', `この環境ではマイクを利用できません${tail}`, err);
+    return new AudioError('mic_error', `マイクの取得に失敗しました${tail}`, err);
   }
   if (name === 'NotAllowedError' || name === 'SecurityError') {
     return new AudioError('screen_denied', `画面・タブ共有が拒否またはキャンセルされました${detail}`, err);
@@ -43,7 +41,7 @@ function mapMediaError(err, kind) {
     return new AudioError('screen_not_found', `共有できる画面・タブが見つかりません${detail}`, err);
   }
   if (name === 'NotSupportedError' || name === 'TypeError') {
-    return new AudioError('display_unsupported', `このブラウザは画面・タブ音声の共有に対応していません${detail}`, err);
+    return new AudioError('display_unsupported', `この環境では画面・タブ共有を利用できません（スマートフォン等の非対応ブラウザ、リモートデスクトップ、管理ポリシーによる無効化など）${detail}`, err);
   }
   return new AudioError('screen_error', `画面・タブ共有に失敗しました${detail}`, err);
 }
